@@ -1,4 +1,4 @@
-package com.lacy;
+package com.lacy.dto;
 
 import lombok.Getter;
 import lombok.Setter;

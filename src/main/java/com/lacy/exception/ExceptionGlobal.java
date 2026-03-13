@@ -1,0 +1,223 @@
+package com.lacy.exception;
+
+import com.lacy.utils.UtilsException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+
+@RestControllerAdvice
+public class ExceptionGlobal {
+
+  /** ✅ Handle ALL database constraint violations (GENERIC) */
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<MessageResponse> handleDataIntegrityViolation(
+      DataIntegrityViolationException ex) {
+
+    Throwable cause = ex;
+
+    while (cause != null) {
+
+      if (cause instanceof org.hibernate.exception.ConstraintViolationException constraintEx) {
+
+        String constraintName = constraintEx.getConstraintName();
+        // ✅ fallback if Hibernate returns null
+        if (constraintName == null) {
+          constraintName = UtilsException.extractConstraintName(constraintEx.getMessage());
+        }
+        String message = resolveConstraintMessage(constraintName);
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(
+                MessageResponse.builder()
+                    .status(HttpStatus.CONFLICT.value())
+                    .message(message)
+                    .build());
+      }
+
+      cause = cause.getCause();
+    }
+
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(
+            MessageResponse.builder()
+                .status(HttpStatus.CONFLICT.value())
+                .message("Duplicate value already exists")
+                .build());
+  }
+
+  /** just util to use in Handle DataIntegrityViolationException */
+  private String resolveConstraintMessage(String constraintName) {
+    if (constraintName == null) {
+      return "Database constraint violation";
+    }
+
+    // remove schema prefix if exists
+    if (constraintName.contains(".")) {
+      constraintName = constraintName.substring(constraintName.lastIndexOf(".") + 1);
+    }
+
+    String[] parts = constraintName.split("_");
+
+    // ✅ UNIQUE constraint
+    if (constraintName.startsWith("uk_")) {
+
+      if (parts.length >= 3) {
+        String field = parts[parts.length - 1];
+        return UtilsException.capitalize(field) + " already exists";
+      }
+
+      return "Duplicate value already exists";
+    }
+
+    // ✅ FOREIGN KEY constraint
+    if (constraintName.startsWith("fk_")) {
+
+      if (parts.length >= 3) {
+        String childTable = parts[1];
+        String parentTable = parts[2];
+
+        return "Cannot delete "
+            + UtilsException.singular(parentTable)
+            + " because it is referenced by "
+            + childTable;
+      }
+
+      return "Cannot delete this record because it is referenced by other data";
+    }
+
+    return "Database constraint violation";
+  }
+
+  /** Handle FileValidationException */
+  @ExceptionHandler(value = FileValidationException.class)
+  public ResponseEntity<MessageResponse> handleFileValidationException(FileValidationException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.BAD_REQUEST.value())
+            .build(),
+        HttpStatus.BAD_REQUEST);
+  }
+
+  /** Handle AccessDeniedException */
+  @ExceptionHandler(value = AccessDeniedException.class)
+  public ResponseEntity<MessageResponse> handAccessDenied(AccessDeniedException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.FORBIDDEN.value())
+            .build(),
+        HttpStatus.FORBIDDEN);
+  }
+
+  /** Handle ServerErrorException */
+  @ExceptionHandler(value = ServerErrorException.class)
+  public ResponseEntity<MessageResponse> handleNotFound(ServerErrorException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+            .build(),
+        HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
+  /** Handle NotFoundException */
+  @ExceptionHandler(value = NotFoundException.class)
+  public ResponseEntity<MessageResponse> handleNotFound(NotFoundException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.NOT_FOUND.value())
+            .build(),
+        HttpStatus.NOT_FOUND);
+  }
+
+  /** Handle BadRequestException */
+  @ExceptionHandler(value = BadRequestException.class)
+  public ResponseEntity<MessageResponse> handleBadRequest(BadRequestException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.BAD_REQUEST.value())
+            .build(),
+        HttpStatus.BAD_REQUEST);
+  }
+
+  /** HttpMediaTypeNotSupportedException */
+  @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+  public ResponseEntity<MessageResponse> handleHttpMediaTypeNotSupported(
+      HttpMediaTypeNotSupportedException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message("Content-Type not supported: " + ex.getContentType())
+            .status(HttpStatus.UNSUPPORTED_MEDIA_TYPE.value())
+            .build(),
+        HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+  }
+
+  /** MaxUploadSizeExceededException */
+  @ExceptionHandler(MaxUploadSizeExceededException.class)
+  public ResponseEntity<MessageResponse> handleMaxSizeException(MaxUploadSizeExceededException ex) {
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(ex.getMessage())
+            .status(HttpStatus.PAYLOAD_TOO_LARGE.value())
+            .build(),
+        HttpStatus.PAYLOAD_TOO_LARGE);
+  }
+
+  /** Handle MethodArgumentTypeMismatchException */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<MessageResponse> handleTypeMismatch(
+      MethodArgumentTypeMismatchException ex) {
+    String message =
+        String.format(
+            "Invalid value '%s' for parameter '%s'. Expected type: %s.",
+            ex.getValue(),
+            ex.getName(),
+            ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "Unknown");
+
+    return new ResponseEntity<>(
+        MessageResponse.builder().message(message).status(HttpStatus.BAD_REQUEST.value()).build(),
+        HttpStatus.BAD_REQUEST);
+  }
+
+  /** Handle MethodArgumentNotValidException */
+  @ExceptionHandler(value = MethodArgumentNotValidException.class)
+  public ResponseEntity<MessageResponse> handleValidationException(
+      MethodArgumentNotValidException exception) {
+    MessageResponse messageResponse = new MessageResponse();
+    messageResponse.setStatus(HttpStatus.BAD_REQUEST.value());
+
+    StringBuilder str = new StringBuilder();
+    var fieldErrors = exception.getBindingResult().getFieldErrors();
+    if (!fieldErrors.isEmpty()) {
+      str.append(fieldErrors.get(0).getField())
+          .append(": ")
+          .append(fieldErrors.get(0).getDefaultMessage());
+    } else {
+      str.append("Validation failed.");
+    }
+    return new ResponseEntity<>(
+        MessageResponse.builder()
+            .message(str.toString())
+            .status(HttpStatus.BAD_REQUEST.value())
+            .build(),
+        HttpStatus.BAD_REQUEST);
+  }
+
+  /** Handle Missing File Upload */
+  @ExceptionHandler(MissingServletRequestPartException.class)
+  public ResponseEntity<MessageResponse> handleMissingFile(MissingServletRequestPartException ex) {
+
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(new MessageResponse(HttpStatus.BAD_REQUEST.value(), ex.getMessage()));
+  }
+}
